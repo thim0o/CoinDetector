@@ -8,7 +8,7 @@ max_value = 255
 max_value_H = 360 // 2
 low_H = 0
 low_S = 0
-low_V = 1
+low_V = 12
 high_H = 180
 high_S = 255
 high_V = 255
@@ -81,7 +81,7 @@ def getParams():
 
     # Filter by Circularity
     params.filterByCircularity = True
-    params.minCircularity = 0.7
+    params.minCircularity = 0.8
 
     return params
 
@@ -102,13 +102,17 @@ def saveNewBgImage():
     cv.imwrite(cam.read(0), "bg.jpg")
 
 
-def getForeground(img, bgImg, opening=3, medianBlur=7):
+def getForeground(img, bgImg, opening=4, medianBlur=3):
     bgSub.apply(bgImg)
     fgMask = bgSub.apply(img)
 
-    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, tuple([opening] * 2))
-    fgMask = cv.morphologyEx(fgMask, cv.MORPH_OPEN, kernel)
-    fgMask = cv.medianBlur(fgMask, medianBlur)
+    if opening:
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, tuple([opening] * 2))
+        fgMask = cv.morphologyEx(fgMask, cv.MORPH_OPEN, kernel)
+
+    if medianBlur:
+        fgMask = cv.medianBlur(fgMask, medianBlur)
+
     foreground = cv.bitwise_and(img, img, mask=fgMask)
 
     return fgMask, foreground
@@ -117,7 +121,7 @@ def getForeground(img, bgImg, opening=3, medianBlur=7):
 def getThresholdedBlurredImg(img):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     thresh = cv.inRange(hsv, (low_H, low_S, low_V), (high_H, high_S, high_V))
-    threshBlurred = cv.medianBlur(thresh, 7)
+    threshBlurred = cv.medianBlur(thresh, 5)
     threshBlurred = cv.bitwise_not(threshBlurred)
     return threshBlurred
 
@@ -126,7 +130,7 @@ def resizeImg(img, resizeFactor):
     return cv.resize(img, (0, 0), fx=resizeFactor, fy=resizeFactor)
 
 
-def main(usingWebcam=False, newBg=False, resizeFactor=0.5):
+def main(usingWebcam=False, newBg=False, resizeFactor=1):
     cam = cv.VideoCapture(0)
     raw = cv.imread("bgfg.jpg")
 
@@ -159,11 +163,12 @@ def main(usingWebcam=False, newBg=False, resizeFactor=0.5):
         imgKeyPoints2 = cv.drawKeypoints(fg, keyPoints, np.array([]), (0, 0, 255),
                                          cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
+        cv.imshow('background', background)
         cv.imshow('threshBlurred', threshBlurred)
         cv.imshow('imgKeyPoints', imgKeyPoints)
         cv.imshow('imgKeyPoints2', imgKeyPoints2)
         cv.imshow('raw', raw)
-        cv.imshow('mask', mask)
+        cv.imshow('foreground mask', mask)
 
         if cv.waitKey(1) == 27:
             break  # esc to quit
