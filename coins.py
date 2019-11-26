@@ -2,13 +2,14 @@ import cv2 as cv
 import numpy as np
 import time
 from copy import deepcopy
+import os
 
 # Trackbar values
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 0
-low_V = 12
+low_S = 26
+low_V = 0
 high_H = 180
 high_S = 255
 high_V = 255
@@ -20,6 +21,8 @@ low_V_name = 'Low V'
 high_H_name = 'High H'
 high_S_name = 'High S'
 high_V_name = 'High V'
+openingAmount = 0
+medianBlurAmount = 21
 
 
 # Trackbar functions
@@ -71,6 +74,19 @@ def on_high_V_thresh_trackbar(val):
     cv.setTrackbarPos(high_V_name, window_detection_name, high_V)
 
 
+def on_opening_trackbar(val):
+    global openingAmount
+    openingAmount = max(1, val)
+
+    cv.setTrackbarPos("openingAmount", window_detection_name, openingAmount)
+
+
+def on_median_trackbar(val):
+    global medianBlurAmount
+    medianBlurAmount = max(1, val + (1 - val % 2))
+    cv.setTrackbarPos("medianBlurAmount", window_detection_name, medianBlurAmount)
+
+
 def getParams():
     params = cv.SimpleBlobDetector_Params()
 
@@ -89,39 +105,54 @@ def getParams():
 def setupTrackbar():
     cv.namedWindow(window_capture_name)
     cv.namedWindow(window_detection_name)
+
+    cv.resizeWindow(window_detection_name, 600, 600)
+
     cv.createTrackbar(low_H_name, window_detection_name, low_H, max_value_H, on_low_H_thresh_trackbar)
     cv.createTrackbar(high_H_name, window_detection_name, high_H, max_value_H, on_high_H_thresh_trackbar)
     cv.createTrackbar(low_S_name, window_detection_name, low_S, max_value, on_low_S_thresh_trackbar)
     cv.createTrackbar(high_S_name, window_detection_name, high_S, max_value, on_high_S_thresh_trackbar)
     cv.createTrackbar(low_V_name, window_detection_name, low_V, max_value, on_low_V_thresh_trackbar)
     cv.createTrackbar(high_V_name, window_detection_name, high_V, max_value, on_high_V_thresh_trackbar)
+    cv.createTrackbar("openingAmount", window_detection_name, openingAmount, max_value, on_opening_trackbar)
+    cv.createTrackbar("medianBlurAmount", window_detection_name, medianBlurAmount, max_value, on_median_trackbar)
 
 
 def saveNewBgImage():
     cam = cv.VideoCapture(0)
-    cv.imwrite(cam.read(0), "bg.jpg")
+    ret_val, raw = cam.read()
+    cv.imwrite("bg.bmp", raw)
 
 
-def getForeground(img, bgImg, opening=4, medianBlur=3):
+def getForeground(img, bgImg, opening=openingAmount, medianBlur=medianBlurAmount):
     bgSub.apply(bgImg)
-    fgMask = bgSub.apply(img)
+    # fgMask = bgSub.apply(img)
+
+    imgHsv = cv.cvtColor(img.copy(), cv.COLOR_BGR2HSV)
+    bgImgHsv = cv.cvtColor(bgImg.copy(), cv.COLOR_BGR2HSV)
+    difference = cv.absdiff(imgHsv, bgImgHsv)
+    fgMask = cv.inRange(difference, (low_H, low_S, low_V), (high_H, high_S, high_V))
 
     if opening:
-        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, tuple([opening] * 2))
+        kernel = cv.getStructuringElement(cv.MORPH_OPEN, tuple([openingAmount] * 2))
         fgMask = cv.morphologyEx(fgMask, cv.MORPH_OPEN, kernel)
 
     if medianBlur:
-        fgMask = cv.medianBlur(fgMask, medianBlur)
+        fgMask = cv.medianBlur(fgMask, medianBlurAmount)
+
+    cv.imshow("dif", difference)
+    # cv.imshow("fgMask2", fgMask2)
+    # cv.imshow("gray", gray)
 
     foreground = cv.bitwise_and(img, img, mask=fgMask)
 
     return fgMask, foreground
 
 
-def getThresholdedBlurredImg(img):
+def getThresholdedBlurredImg(img, amount=5):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     thresh = cv.inRange(hsv, (low_H, low_S, low_V), (high_H, high_S, high_V))
-    threshBlurred = cv.medianBlur(thresh, 5)
+    threshBlurred = cv.medianBlur(thresh, amount)
     threshBlurred = cv.bitwise_not(threshBlurred)
     return threshBlurred
 
@@ -132,7 +163,7 @@ def resizeImg(img, resizeFactor):
 
 def main(usingWebcam=False, newBg=False, resizeFactor=1):
     cam = cv.VideoCapture(0)
-    raw = cv.imread("bgfg.jpg")
+    raw = cv.imread("bgfg.bmp")
 
     detector = cv.SimpleBlobDetector_create(getParams())
     setupTrackbar()
@@ -140,7 +171,7 @@ def main(usingWebcam=False, newBg=False, resizeFactor=1):
     if newBg:
         saveNewBgImage()
 
-    background = cv.imread("bg.jpg")
+    background = cv.imread("bg.bmp")
     background = resizeImg(background, resizeFactor)
 
     while True:
@@ -160,14 +191,12 @@ def main(usingWebcam=False, newBg=False, resizeFactor=1):
         imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
                                         cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-        imgKeyPoints2 = cv.drawKeypoints(fg, keyPoints, np.array([]), (0, 0, 255),
-                                         cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
         cv.imshow('background', background)
+        cv.imshow('fg', fg)
         cv.imshow('threshBlurred', threshBlurred)
         cv.imshow('imgKeyPoints', imgKeyPoints)
-        cv.imshow('imgKeyPoints2', imgKeyPoints2)
-        cv.imshow('raw', raw)
+        # cv.imshow('imgKeyPoints2', imgKeyPoints2)
+        # cv.imshow('img', img)
         cv.imshow('foreground mask', mask)
 
         if cv.waitKey(1) == 27:
@@ -175,9 +204,9 @@ def main(usingWebcam=False, newBg=False, resizeFactor=1):
 
         fps = round(1 / (time.time() - lastStart), 1)
         print("{} coins detected. {} fps".format(len(keyPoints), fps))
-        # time.sleep(0.05)
+        time.sleep(0.05)
 
 
 if __name__ == '__main__':
-    bgSub = cv.createBackgroundSubtractorMOG2(detectShadows=False, history=1)
+    bgSub = cv.createBackgroundSubtractorMOG2(detectShadows=True, history=1)
     main()
