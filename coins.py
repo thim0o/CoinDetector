@@ -8,7 +8,7 @@ import os
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 26
+low_S = 27
 low_V = 0
 high_H = 180
 high_S = 255
