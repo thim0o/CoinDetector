@@ -149,19 +149,46 @@ def getForeground(img, bgImg, opening=openingAmount, medianBlur=medianBlurAmount
     return fgMask, foreground
 
 
-def getThresholdedBlurredImg(img, amount=5):
+def getThresholdedBlurredImg(img, amount=7):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-    thresh = cv.inRange(hsv, (low_H, low_S, low_V), (high_H, high_S, high_V))
+    thresh = cv.inRange(hsv, (low_H, 1, low_V), (high_H, high_S, high_V))
     threshBlurred = cv.medianBlur(thresh, amount)
     threshBlurred = cv.bitwise_not(threshBlurred)
     return threshBlurred
 
 
 def resizeImg(img, resizeFactor):
+    if resizeFactor == 1:
+        return img
     return cv.resize(img, (0, 0), fx=resizeFactor, fy=resizeFactor)
 
 
-def main(usingWebcam=False, newBg=False, resizeFactor=1):
+def getCoinImages(keyPoints, raw):
+    for i, kp in enumerate(keyPoints):
+        x, y = kp.pt
+        # size = kp.size * 2
+        size = 86
+        print(x, y, size)
+
+        startX = int(x - size)
+        stopX = int(x + size)
+
+        startY = int(y - size)
+        stopY = int(y + size)
+
+        if startX < 0 or startY < 0 or stopX > 720 or stopY > 1280:
+            print("Can't take full image of this coin!!")
+            continue
+
+        coinImg = raw[startY:stopY, startX:stopX]
+
+        cv.imshow("coin" + str(i), coinImg)
+
+        if cv.waitKey(1) == 83:
+            print("s clicked")
+
+
+def main(usingWebcam=True, newBg=False, resizeFactor=1):
     cam = cv.VideoCapture(0)
     raw = cv.imread("bgfg.bmp")
 
@@ -189,7 +216,9 @@ def main(usingWebcam=False, newBg=False, resizeFactor=1):
         keyPoints = detector.detect(threshBlurred)
 
         imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
-                                        cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                                        cv.DRAW_MATCHES_FLAGS_DEFAULT)
+
+        getCoinImages(keyPoints, raw)
 
         cv.imshow('background', background)
         cv.imshow('fg', fg)
