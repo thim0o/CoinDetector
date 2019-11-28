@@ -125,35 +125,27 @@ def saveNewBgImage():
 
 
 def getForeground(img, bgImg, opening=openingAmount, medianBlur=medianBlurAmount):
-    bgSub.apply(bgImg)
-    # fgMask = bgSub.apply(img)
-
     imgHsv = cv.cvtColor(img.copy(), cv.COLOR_BGR2HSV)
     bgImgHsv = cv.cvtColor(bgImg.copy(), cv.COLOR_BGR2HSV)
     difference = cv.absdiff(imgHsv, bgImgHsv)
     fgMask = cv.inRange(difference, (low_H, low_S, low_V), (high_H, high_S, high_V))
 
     if opening:
-        kernel = cv.getStructuringElement(cv.MORPH_OPEN, tuple([openingAmount] * 2))
+        kernel = cv.getStructuringElement(cv.MORPH_OPEN, tuple([opening] * 2))
         fgMask = cv.morphologyEx(fgMask, cv.MORPH_OPEN, kernel)
 
     if medianBlur:
-        fgMask = cv.medianBlur(fgMask, medianBlurAmount)
-
-    cv.imshow("dif", difference)
-    # cv.imshow("fgMask2", fgMask2)
-    # cv.imshow("gray", gray)
+        fgMask = cv.medianBlur(fgMask, medianBlur)
 
     foreground = cv.bitwise_and(img, img, mask=fgMask)
 
-    return fgMask, foreground
+    return difference, fgMask, foreground
 
 
-def getThresholdedBlurredImg(img, amount=7):
+def getThresholdedBlurredImg(img):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-    thresh = cv.inRange(hsv, (low_H, 1, low_V), (high_H, high_S, high_V))
-    threshBlurred = cv.medianBlur(thresh, amount)
-    threshBlurred = cv.bitwise_not(threshBlurred)
+    thresh = cv.inRange(hsv, (0, 1, 0), (360, 360, 360))
+    threshBlurred = cv.bitwise_not(thresh)
     return threshBlurred
 
 
@@ -163,12 +155,11 @@ def resizeImg(img, resizeFactor):
     return cv.resize(img, (0, 0), fx=resizeFactor, fy=resizeFactor)
 
 
-def getCoinImages(keyPoints, raw):
+def getCoinImages(keyPoints, raw, showCoins=True):
+    images = []
     for i, kp in enumerate(keyPoints):
         x, y = kp.pt
-        # size = kp.size * 2
         size = 86
-        print(x, y, size)
 
         startX = int(x - size)
         stopX = int(x + size)
@@ -177,18 +168,34 @@ def getCoinImages(keyPoints, raw):
         stopY = int(y + size)
 
         if startX < 0 or startY < 0 or stopX > 720 or stopY > 1280:
-            print("Can't take full image of this coin!!")
             continue
 
         coinImg = raw[startY:stopY, startX:stopX]
+        images.append(coinImg)
 
-        cv.imshow("coin" + str(i), coinImg)
+        if showCoins:
+            cv.imshow("coin" + str(i), coinImg)
 
-        if cv.waitKey(1) == 83:
-            print("s clicked")
+    return images
 
 
-def main(usingWebcam=True, newBg=False, resizeFactor=1):
+def saveImages(coinImages, folder="images", subFolder="1euro"):
+    location = os.path.join(folder, subFolder)
+    print("SAVING {} images in {}".format(len(coinImages), location))
+
+    if not os.path.exists(location):
+        os.mkdir(location)
+
+    timeStamp = time.ctime().replace(":", "-")
+
+    for i, img in enumerate(coinImages):
+        fileName = "{} {}.bmp".format(timeStamp, i)
+        fullPath = os.path.join(location, fileName)
+        cv.imwrite(fullPath, img)
+        print(fullPath)
+
+
+def main(usingWebcam=False, newBg=False, resizeFactor=1, lotsOfPlots=False, showCoins=True):
     cam = cv.VideoCapture(0)
     raw = cv.imread("bgfg.bmp")
 
@@ -210,32 +217,41 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1):
         img = deepcopy(raw)
         img = resizeImg(img, resizeFactor)
 
-        mask, fg = getForeground(img, background)
+        difference, mask, fg = getForeground(img, background)
         threshBlurred = getThresholdedBlurredImg(fg)
 
         keyPoints = detector.detect(threshBlurred)
 
         imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
-                                        cv.DRAW_MATCHES_FLAGS_DEFAULT)
+                                        cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-        getCoinImages(keyPoints, raw)
+        coinImages = getCoinImages(keyPoints, raw, showCoins)
 
-        cv.imshow('background', background)
-        cv.imshow('fg', fg)
-        cv.imshow('threshBlurred', threshBlurred)
         cv.imshow('imgKeyPoints', imgKeyPoints)
-        # cv.imshow('imgKeyPoints2', imgKeyPoints2)
-        # cv.imshow('img', img)
-        cv.imshow('foreground mask', mask)
 
-        if cv.waitKey(1) == 27:
+        if lotsOfPlots:
+            cv.imshow('background', background)
+            cv.imshow('fg', fg)
+            cv.imshow('img', img)
+            cv.imshow('threshBlurred', threshBlurred)
+            cv.imshow('foreground mask', mask)
+            cv.imshow("dif", difference)
+
+        k = cv.waitKey(1)
+
+        if k == ord("s"):
+            saveImages(coinImages)
+        elif k == 27:
             break  # esc to quit
 
         fps = round(1 / (time.time() - lastStart), 1)
         print("{} coins detected. {} fps".format(len(keyPoints), fps))
-        time.sleep(0.05)
+        print("{} coin images".format(len(coinImages)))
+        # time.sleep(0.05)
 
 
 if __name__ == '__main__':
-    bgSub = cv.createBackgroundSubtractorMOG2(detectShadows=True, history=1)
-    main()
+    # main()
+    import cProfile
+
+    cProfile.run("main()")
