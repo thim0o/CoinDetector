@@ -8,7 +8,7 @@ import os
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 25
+low_S = 16
 low_V = 0
 high_H = 180
 high_S = 255
@@ -22,7 +22,7 @@ high_H_name = 'High H'
 high_S_name = 'High S'
 high_V_name = 'High V'
 openingAmount = 0
-medianBlurAmount = 21
+medianBlurAmount = 23
 
 
 # Trackbar functions
