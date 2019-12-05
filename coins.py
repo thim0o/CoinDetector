@@ -1,13 +1,14 @@
 import cv2 as cv
 import numpy as np
 import time
+from copy import deepcopy
 import os
 
 # Trackbar values
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 24
+low_S = 18
 low_V = 0
 high_H = 180
 high_S = 255
@@ -21,7 +22,7 @@ high_H_name = 'High H'
 high_S_name = 'High S'
 high_V_name = 'High V'
 openingAmount = 0
-medianBlurAmount = 15
+medianBlurAmount = 31
 
 
 # Trackbar functions
@@ -160,6 +161,7 @@ def getThresholdedBlurredImg(img):
     # Combine the two images to get the foreground.
     im_out = thresh | im_floodfill_inv
     im_out = cv.bitwise_not(im_out)
+    im_out = cv.medianBlur(im_out, 5)
 
     return im_out
 
@@ -195,7 +197,7 @@ def getCoinImages(keyPoints, raw, showCoins=True):
     return images
 
 
-def saveImages(coinImages, folder="tests", subFolder="10euro"):
+def saveImages(coinImages, folder="images", subFolder="none"):
     location = os.path.join(folder, subFolder)
     print("SAVING {} images in {}".format(len(coinImages), location))
 
@@ -205,7 +207,7 @@ def saveImages(coinImages, folder="tests", subFolder="10euro"):
     timeStamp = time.ctime().replace(":", "-")
 
     for i, img in enumerate(coinImages):
-        fileName = "{} {}.jpg".format(timeStamp, i)
+        fileName = "{} {}.bmp".format(timeStamp, i)
         fullPath = os.path.join(location, fileName)
         cv.imwrite(fullPath, img)
         print(fullPath)
@@ -232,7 +234,7 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCo
         if usingWebcam:
             ret_val, raw = cam.read()
 
-        img = raw.copy()
+        img = deepcopy(raw)
         img = resizeImg(img, resizeFactor)
 
         difference, mask, fg = getForeground(img, background, openingAmount, medianBlurAmount)
