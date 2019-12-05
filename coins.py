@@ -1,14 +1,13 @@
 import cv2 as cv
 import numpy as np
 import time
-from copy import deepcopy
 import os
 
 # Trackbar values
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 16
+low_S = 24
 low_V = 0
 high_H = 180
 high_S = 255
@@ -22,7 +21,7 @@ high_H_name = 'High H'
 high_S_name = 'High S'
 high_V_name = 'High V'
 openingAmount = 0
-medianBlurAmount = 23
+medianBlurAmount = 15
 
 
 # Trackbar functions
@@ -92,8 +91,8 @@ def getParams():
 
     # Filter by Area.
     params.filterByArea = True
-    params.minArea = 100
-    params.maxArea = 90000000
+    params.minArea = 1000
+    params.maxArea = 900000000
 
     # Filter by Circularity
     params.filterByCircularity = True
@@ -124,10 +123,7 @@ def saveNewBgImage():
     cv.imwrite("bg.bmp", raw)
 
 
-def getForeground(img, bgImg, opening=openingAmount, medianBlur=medianBlurAmount):
-    bgSub.apply(bgImg)
-    # fgMask = bgSub.apply(img)
-
+def getForeground(img, bgImg, opening, medianBlur):
     imgHsv = cv.cvtColor(img.copy(), cv.COLOR_BGR2HSV)
     bgImgHsv = cv.cvtColor(bgImg.copy(), cv.COLOR_BGR2HSV)
     difference = cv.absdiff(imgHsv, bgImgHsv)
@@ -140,21 +136,32 @@ def getForeground(img, bgImg, opening=openingAmount, medianBlur=medianBlurAmount
     if medianBlur:
         fgMask = cv.medianBlur(fgMask, medianBlurAmount)
 
-    cv.imshow("dif", difference)
-    # cv.imshow("fgMask2", fgMask2)
-    # cv.imshow("gray", gray)
-
     foreground = cv.bitwise_and(img, img, mask=fgMask)
 
-    return fgMask, foreground
+    return difference, fgMask, foreground
 
 
-def getThresholdedBlurredImg(img, amount=7):
+def getThresholdedBlurredImg(img):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
     thresh = cv.inRange(hsv, (low_H, 1, low_V), (high_H, high_S, high_V))
-    threshBlurred = cv.medianBlur(thresh, amount)
-    threshBlurred = cv.bitwise_not(threshBlurred)
-    return threshBlurred
+    im_floodfill = thresh.copy()
+
+    # Mask used to flood filling.
+    # Notice the size needs to be 2 pixels than the image.
+    h, w = thresh.shape[:2]
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+
+    # Floodfill from point (0, 0)
+    cv.floodFill(im_floodfill, mask, (0, 0), 255)
+
+    # Invert floodfilled image
+    im_floodfill_inv = cv.bitwise_not(im_floodfill)
+
+    # Combine the two images to get the foreground.
+    im_out = thresh | im_floodfill_inv
+    im_out = cv.bitwise_not(im_out)
+
+    return im_out
 
 
 def resizeImg(img, resizeFactor):
@@ -167,9 +174,7 @@ def getCoinImages(keyPoints, raw, showCoins=True):
     images = []
     for i, kp in enumerate(keyPoints):
         x, y = kp.pt
-        # size = kp.size * 2
         size = 70
-        print(x, y, size)
 
         startX = int(x - size)
         stopX = int(x + size)
@@ -190,7 +195,7 @@ def getCoinImages(keyPoints, raw, showCoins=True):
     return images
 
 
-def saveImages(coinImages, folder="images", subFolder="10cent"):
+def saveImages(coinImages, folder="tests", subFolder="10euro"):
     location = os.path.join(folder, subFolder)
     print("SAVING {} images in {}".format(len(coinImages), location))
 
@@ -200,18 +205,17 @@ def saveImages(coinImages, folder="images", subFolder="10cent"):
     timeStamp = time.ctime().replace(":", "-")
 
     for i, img in enumerate(coinImages):
-        fileName = "{} {}.bmp".format(timeStamp, i)
+        fileName = "{} {}.jpg".format(timeStamp, i)
         fullPath = os.path.join(location, fileName)
         cv.imwrite(fullPath, img)
         print(fullPath)
 
 
-def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCoins=True):
+def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCoins=True, trackBar=True):
     cam = cv.VideoCapture(0)
     raw = cv.imread("bgfg.bmp")
 
     detector = cv.SimpleBlobDetector_create(getParams())
-    setupTrackbar()
 
     if newBg:
         saveNewBgImage()
@@ -219,30 +223,36 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCo
     background = cv.imread("bg.bmp")
     background = resizeImg(background, resizeFactor)
 
+    if trackBar:
+        setupTrackbar()
+
     while True:
         lastStart = time.time()
 
         if usingWebcam:
             ret_val, raw = cam.read()
 
-        img = deepcopy(raw)
+        img = raw.copy()
         img = resizeImg(img, resizeFactor)
 
-        mask, fg = getForeground(img, background)
+        difference, mask, fg = getForeground(img, background, openingAmount, medianBlurAmount)
         threshBlurred = getThresholdedBlurredImg(fg)
+        fg = cv.bitwise_and(img, img, mask=threshBlurred)
 
         keyPoints = detector.detect(threshBlurred)
 
         imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
-                                        cv.DRAW_MATCHES_FLAGS_DEFAULT)
+                                        cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-        images = getCoinImages(keyPoints, raw)
+        images = getCoinImages(keyPoints, raw, showCoins)
 
         if lotsOfPlots:
             cv.imshow('background', background)
             cv.imshow('fg', fg)
             cv.imshow('threshBlurred', threshBlurred)
             cv.imshow('foreground mask', mask)
+            cv.imshow("dif", difference)
+
         cv.imshow('imgKeyPoints', imgKeyPoints)
 
         k = cv.waitKey(1)
@@ -253,9 +263,10 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCo
 
         fps = round(1 / (time.time() - lastStart), 1)
         print("{} coins detected. {} fps".format(len(keyPoints), fps))
-        time.sleep(0.05)
+        # time.sleep(0.05)
 
 
 if __name__ == '__main__':
-    bgSub = cv.createBackgroundSubtractorMOG2(detectShadows=True, history=1)
-    main()
+    import cProfile
+
+    cProfile.run("main()")
