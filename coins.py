@@ -3,12 +3,17 @@ import numpy as np
 import time
 from copy import deepcopy
 import os
+from keras.models import load_model
+from PIL import Image
+import matplotlib.image as mpimg
+
+model = load_model('model.h5')
 
 # Trackbar values
 max_value = 255
 max_value_H = 360 // 2
 low_H = 0
-low_S = 18
+low_S = 25
 low_V = 0
 high_H = 180
 high_S = 255
@@ -22,8 +27,9 @@ high_H_name = 'High H'
 high_S_name = 'High S'
 high_V_name = 'High V'
 openingAmount = 0
-medianBlurAmount = 31
-
+medianBlurAmount = 21
+Radius = 65
+font = cv.FONT_HERSHEY_SIMPLEX
 
 # Trackbar functions
 def on_low_H_thresh_trackbar(val):
@@ -127,6 +133,7 @@ def saveNewBgImage():
 def getForeground(img, bgImg, opening, medianBlur):
     imgHsv = cv.cvtColor(img.copy(), cv.COLOR_BGR2HSV)
     bgImgHsv = cv.cvtColor(bgImg.copy(), cv.COLOR_BGR2HSV)
+
     difference = cv.absdiff(imgHsv, bgImgHsv)
     fgMask = cv.inRange(difference, (low_H, low_S, low_V), (high_H, high_S, high_V))
 
@@ -144,11 +151,19 @@ def getForeground(img, bgImg, opening, medianBlur):
 
 def getThresholdedBlurredImg(img):
     hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-    thresh = cv.inRange(hsv, (low_H, 1, low_V), (high_H, high_S, high_V))
-    im_floodfill = thresh.copy()
+    thresh = cv.inRange(hsv, (0, 1, 0), (360, 360, 360))
 
-    # Mask used to flood filling.
-    # Notice the size needs to be 2 pixels than the image.
+    des = thresh
+    contour, hier = cv.findContours(des, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE)
+
+    for cnt in contour:
+        cv.drawContours(des, [cnt], 0, 255, -1)
+
+    contours = cv.bitwise_not(des)
+
+    # flood filling.
+    """
+    im_floodfill = thresh.copy()
     h, w = thresh.shape[:2]
     mask = np.zeros((h + 2, w + 2), np.uint8)
 
@@ -162,8 +177,9 @@ def getThresholdedBlurredImg(img):
     im_out = thresh | im_floodfill_inv
     im_out = cv.bitwise_not(im_out)
     im_out = cv.medianBlur(im_out, 5)
+    """
 
-    return im_out
+    return contours
 
 
 def resizeImg(img, resizeFactor):
@@ -176,7 +192,7 @@ def getCoinImages(keyPoints, raw, showCoins=True):
     images = []
     for i, kp in enumerate(keyPoints):
         x, y = kp.pt
-        size = 70
+        size = Radius
 
         startX = int(x - size)
         stopX = int(x + size)
@@ -213,7 +229,19 @@ def saveImages(coinImages, folder="images", subFolder="none"):
         print(fullPath)
 
 
-def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCoins=True, trackBar=True):
+def predictClass(coinImage):
+    image = coinImage
+    x, y = image.shape[:2]
+    image = resizeImg(image, 224 / x)
+
+    probabilities = model.predict(np.expand_dims(image, axis=0))
+    type_list = ((0, '10cent'), (1, '1euro'), (2, '20cent'), (3, '2euro'), (4, '50cent'), (5, '5cent'))
+
+    for i in probabilities.argsort()[0][-6:][::-1]:
+        return probabilities[0][i], type_list[i][1]
+
+
+def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCoins=True, trackBar=True, predict=False):
     cam = cv.VideoCapture(0)
     raw = cv.imread("bgfg.bmp")
 
@@ -243,10 +271,30 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCo
 
         keyPoints = detector.detect(threshBlurred)
 
-        imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
-                                        cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        # imgKeyPoints = cv.drawKeypoints(img, keyPoints, np.array([]), (0, 0, 255),
+        #                                 cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
         images = getCoinImages(keyPoints, raw, showCoins)
+
+        imgKeyPoints = img.copy()
+        if predict:
+            for i, coin in enumerate(keyPoints):
+                x, y = coin.pt
+                startX = int(x - Radius)
+                stopX = int(x + Radius)
+
+                startY = int(y - Radius)
+                stopY = int(y + Radius)
+                cv.rectangle(imgKeyPoints, (startX, startY), (stopX, stopY), (0, 255, 0), 4, cv.LINE_AA)
+                # cv.rectangle(imgKeyPoints, (15, 25), (200, 150), (0, 0, 255), 4, cv.LINE_AA)
+
+                prob, name = list(predictClass(images[i]))
+                prob = format(prob * 100, '.2f')
+                output = name + ': ' + str(prob) + '%'
+                cv.putText(imgKeyPoints, output, (startX, startY), font, 1, (0, 0, 255), 4, cv.LINE_AA)
+
+
+
 
         if lotsOfPlots:
             cv.imshow('background', background)
@@ -256,19 +304,17 @@ def main(usingWebcam=True, newBg=False, resizeFactor=1, lotsOfPlots=True, showCo
             cv.imshow("dif", difference)
 
         cv.imshow('imgKeyPoints', imgKeyPoints)
-
+        cv.imshow('img', img)
         k = cv.waitKey(1)
         if k == 27:
             break  # esc to quit
         elif k == ord("s"):
             saveImages(images)
 
-        fps = round(1 / (time.time() - lastStart), 1)
-        print("{} coins detected. {} fps".format(len(keyPoints), fps))
+        # fps = round(1 / (time.time() - lastStart), 1)
+        # print("{} coins detected. {} fps".format(len(keyPoints), fps))
         # time.sleep(0.05)
 
 
 if __name__ == '__main__':
-    import cProfile
-
-    cProfile.run("main()")
+    main()
